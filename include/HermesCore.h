@@ -173,6 +173,59 @@ int32_t hermes_connection_delete(
     const char *id
 );
 
+/* ===== Preferences ===== */
+
+/*
+ * AppPreferences is a single document, not a collection — there is no
+ * list/load/save/delete CRUD, just load/save of the whole struct.
+ *
+ * JSON wire format (every field is optional; missing means "use the
+ * UX default"):
+ *
+ *   {
+ *     "lastConnectionID":              "<uuid>"  | null,
+ *     "terminalTheme":                 { ... }   | null,  // see TerminalThemePreference
+ *     "automaticallyChecksForUpdates": true      | null,
+ *     "lastAutomaticUpdateCheckAt":    "<iso8601>" | null,
+ *     "workspaceFileBookmarks":        [ ... ]   | null,  // see WorkspaceFileBookmark
+ *     "pinnedSessions":                [ ... ]   | null,  // see PinnedSession
+ *     "workflows":                     [ ... ]   | null   // see WorkflowPreset
+ *   }
+ *
+ * Nested type shapes (Codable structs in Swift) — consult their source
+ * files when wiring the C++ UI to specific fields:
+ *
+ *   TerminalThemePreference   Sources/HermesDesktop/Models/TerminalTheme.swift
+ *   WorkspaceFileBookmark     Sources/HermesDesktop/Models/WorkspaceFileModels.swift
+ *   PinnedSession             Sources/HermesDesktop/Models/SessionModels.swift
+ *   WorkflowPreset            Sources/HermesDesktop/Models/WorkflowModels.swift
+ *
+ * JSONEncoder omits keys with null values, so the wire form for a
+ * fresh AppPreferences() is literally "{}".
+ */
+
+/*
+ * Returns the persisted AppPreferences as JSON. Returns "{}" (an empty
+ * JSON object) when the file doesn't exist — callers treat that as
+ * "first run, use defaults". Returns NULL only on invalid handle or
+ * unexpected I/O failure.
+ * Caller frees with hermes_free_string.
+ */
+char *hermes_preferences_load(hermes_handle_t handle);
+
+/*
+ * Persists the entire AppPreferences document. The payload must encode
+ * the full struct — partial-update semantics (load + mutate + save) are
+ * the C++ UI's responsibility.
+ *
+ * Returns 0 / -1 / -2 / -3 per the status codes used by the connection
+ * surface.
+ */
+int32_t hermes_preferences_save(
+    hermes_handle_t handle,
+    const char *preferences_json
+);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

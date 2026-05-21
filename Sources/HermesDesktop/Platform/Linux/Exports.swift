@@ -231,6 +231,65 @@ public func hermes_connection_delete(
     }
 }
 
+// MARK: - Preferences
+//
+// AppPreferences is a single document (not a collection), so the surface
+// is just load/save. Schema includes lastConnectionID, terminalTheme,
+// automaticallyChecksForUpdates, lastAutomaticUpdateCheckAt,
+// workspaceFileBookmarks, pinnedSessions, workflows — every field is
+// optional so older files (missing newer keys) and newer files (with
+// keys we don't recognize) both decode cleanly.
+
+/// Returns the persisted AppPreferences as JSON.
+/// When the file doesn't exist (first run), returns "{}" rather than NULL —
+/// callers treat that as "use defaults everywhere". NULL is reserved for
+/// invalid handle or unexpected I/O failure.
+/// Caller frees with hermes_free_string.
+@_cdecl("hermes_preferences_load")
+public func hermes_preferences_load(_ pathsHandle: Int64) -> UnsafeMutablePointer<CChar>? {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return nil
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    do {
+        let preferences = try persistence.loadPreferences()
+        return JsonBridge.emit(preferences)
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        return JsonBridge.emit(AppPreferences())
+    } catch {
+        return nil
+    }
+}
+
+/// Persists the entire AppPreferences document. The payload must encode
+/// the full AppPreferences struct; partial-update semantics are the C++
+/// UI's responsibility (load + mutate + save).
+///
+/// Status codes match the connection surface:
+///    0  success
+///   -1  invalid handle
+///   -2  JSON parse failure
+///   -3  I/O failure
+@_cdecl("hermes_preferences_save")
+public func hermes_preferences_save(
+    _ pathsHandle: Int64,
+    _ preferencesJson: UnsafePointer<CChar>?
+) -> Int32 {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return -1
+    }
+    guard let preferences: AppPreferences = JsonBridge.consume(preferencesJson) else {
+        return -2
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    do {
+        try persistence.savePreferences(preferences)
+        return 0
+    } catch {
+        return -3
+    }
+}
+
 // MARK: - Private helpers
 
 private func defaultApplicationSupportURL() -> URL {

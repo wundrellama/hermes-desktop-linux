@@ -259,6 +259,88 @@ int main(void) {
     hermes_apppaths_release(cs);
     rmrf("/tmp/hermes-smoke-config/HermesDesktop");
 
+    /* =====================================================================
+     * Preferences load/save round-trip against a fresh /tmp test directory.
+     * ===================================================================== */
+    printf("\n--- preferences round-trip ---\n");
+
+    rmrf("/tmp/hermes-smoke-prefs/HermesDesktop");
+    hermes_handle_t ps = hermes_apppaths_init("/tmp/hermes-smoke-prefs", NULL);
+    check_handle("hermes_apppaths_init(prefs)", ps);
+
+    /* 1. First-run load: file is absent → "{}" not NULL. */
+    char *first_load = hermes_preferences_load(ps);
+    check_nonnull("hermes_preferences_load(first run)", first_load);
+    if (first_load != NULL && strcmp(first_load, "{}") != 0) {
+        fprintf(stderr, "FAIL: expected '{}' on first run, got '%s'\n", first_load);
+        failures++;
+    } else {
+        printf("first_load = %s\n", first_load ? first_load : "(null)");
+    }
+    hermes_free_string(first_load);
+
+    /* 2. Save a payload with a couple of scalar fields. */
+    const char *prefs_a =
+        "{"
+        "\"lastConnectionID\":\"11111111-2222-3333-4444-555555555555\","
+        "\"automaticallyChecksForUpdates\":true,"
+        "\"lastAutomaticUpdateCheckAt\":\"2026-05-20T20:00:00Z\""
+        "}";
+    check_status("hermes_preferences_save(A)",
+                 hermes_preferences_save(ps, prefs_a), 0);
+
+    char *prefs_after_save = hermes_preferences_load(ps);
+    check_substring("prefs after save: lastConnectionID present", prefs_after_save,
+                    "11111111-2222-3333-4444-555555555555");
+    check_substring("prefs after save: updates flag present", prefs_after_save,
+                    "automaticallyChecksForUpdates");
+    check_substring("prefs after save: timestamp present", prefs_after_save,
+                    "2026-05-20T20:00:00Z");
+    printf("prefs_after_save = %s\n", prefs_after_save ? prefs_after_save : "(null)");
+    hermes_free_string(prefs_after_save);
+
+    /* 3. Overwrite with a smaller payload — explicit fields disappear. */
+    const char *prefs_b = "{\"automaticallyChecksForUpdates\":false}";
+    check_status("hermes_preferences_save(B overwrite)",
+                 hermes_preferences_save(ps, prefs_b), 0);
+
+    char *after_overwrite = hermes_preferences_load(ps);
+    check_substring("overwrite: only one key remains",
+                    after_overwrite, "automaticallyChecksForUpdates");
+    if (after_overwrite && strstr(after_overwrite, "lastConnectionID") != NULL) {
+        fprintf(stderr, "FAIL: overwrite leaked lastConnectionID: %s\n",
+                after_overwrite);
+        failures++;
+    }
+    hermes_free_string(after_overwrite);
+
+    /* 4. Save the empty object — re-resets to first-run state. */
+    check_status("hermes_preferences_save(empty)",
+                 hermes_preferences_save(ps, "{}"), 0);
+    char *after_empty = hermes_preferences_load(ps);
+    if (after_empty == NULL || strcmp(after_empty, "{}") != 0) {
+        fprintf(stderr, "FAIL: expected '{}' after empty save, got '%s'\n",
+                after_empty ? after_empty : "(null)");
+        failures++;
+    }
+    hermes_free_string(after_empty);
+
+    /* 5. Error paths */
+    check_status("prefs save with malformed JSON",
+                 hermes_preferences_save(ps, "{not real json"), -2);
+    check_status("prefs save against invalid handle",
+                 hermes_preferences_save(0, "{}"), -1);
+
+    char *bad_load = hermes_preferences_load(999999);
+    if (bad_load != NULL) {
+        fprintf(stderr, "FAIL: prefs load of bogus handle returned %s\n", bad_load);
+        hermes_free_string(bad_load);
+        failures++;
+    }
+
+    hermes_apppaths_release(ps);
+    rmrf("/tmp/hermes-smoke-prefs/HermesDesktop");
+
     if (failures == 0) {
         printf("OK — all smoke checks passed\n");
         return 0;
