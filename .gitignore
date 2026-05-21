@@ -3,6 +3,9 @@
 /.build
 /.build-tests
 /.cache
+/build
+/build-cxx
+compile_commands.json
 /.deriveddata
 /.deriveddata-device
 /dist
