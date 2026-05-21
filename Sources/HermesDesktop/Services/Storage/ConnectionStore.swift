@@ -42,16 +42,12 @@ final class ConnectionStore: ObservableObject {
     }
 
     private let paths: AppPaths
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-    private let privateFileAttributes: [FileAttributeKey: Any] = [
-        .posixPermissions: NSNumber(value: Int16(0o600))
-    ]
+    private let persistence: ConnectionPersistence
     private var isHydratingFromDisk = false
 
     init(paths: AppPaths) {
         self.paths = paths
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        self.persistence = ConnectionPersistence(paths: paths)
         load()
     }
 
@@ -202,10 +198,7 @@ final class ConnectionStore: ObservableObject {
 
     private func saveConnections() {
         do {
-            paths.ensureApplicationSupportDirectory()
-            let data = try encoder.encode(connections)
-            try data.write(to: paths.connectionsURL, options: [.atomic])
-            try fileManagerSetPrivatePermissions(at: paths.connectionsURL)
+            try persistence.saveConnections(connections)
         } catch {
             reportPersistenceError(
                 "Unable to save saved hosts to \(paths.connectionsURL.lastPathComponent): \(error.localizedDescription)"
@@ -226,10 +219,7 @@ final class ConnectionStore: ObservableObject {
         )
 
         do {
-            paths.ensureApplicationSupportDirectory()
-            let data = try encoder.encode(preferences)
-            try data.write(to: paths.preferencesURL, options: [.atomic])
-            try fileManagerSetPrivatePermissions(at: paths.preferencesURL)
+            try persistence.savePreferences(preferences)
         } catch {
             reportPersistenceError(
                 "Unable to save app preferences to \(paths.preferencesURL.lastPathComponent): \(error.localizedDescription)"
@@ -239,9 +229,7 @@ final class ConnectionStore: ObservableObject {
 
     private func loadConnections() {
         do {
-            let data = try Data(contentsOf: paths.connectionsURL)
-            connections = try decoder.decode([ConnectionProfile].self, from: data)
-            try? fileManagerSetPrivatePermissions(at: paths.connectionsURL)
+            connections = try persistence.loadConnections()
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             connections = []
         } catch {
@@ -254,10 +242,8 @@ final class ConnectionStore: ObservableObject {
 
     private func loadPreferences() {
         do {
-            let data = try Data(contentsOf: paths.preferencesURL)
-            let decoded = try decoder.decode(AppPreferences.self, from: data)
+            let decoded = try persistence.loadPreferences()
             applyPreferences(decoded)
-            try? fileManagerSetPrivatePermissions(at: paths.preferencesURL)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             applyDefaultPreferences()
         } catch {
@@ -300,20 +286,6 @@ final class ConnectionStore: ObservableObject {
     private func reportPersistenceError(_ message: String) {
         persistenceError = message
     }
-
-    private func fileManagerSetPrivatePermissions(at url: URL) throws {
-        try paths.fileManager.setAttributes(privateFileAttributes, ofItemAtPath: url.path)
-    }
-}
-
-private struct AppPreferences: Codable {
-    var lastConnectionID: UUID?
-    var terminalTheme: TerminalThemePreference?
-    var automaticallyChecksForUpdates: Bool?
-    var lastAutomaticUpdateCheckAt: Date?
-    var workspaceFileBookmarks: [WorkspaceFileBookmark]?
-    var pinnedSessions: [PinnedSession]?
-    var workflows: [WorkflowPreset]?
 }
 
 private extension String {
