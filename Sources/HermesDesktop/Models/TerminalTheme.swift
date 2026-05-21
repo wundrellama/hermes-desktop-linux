@@ -1,5 +1,10 @@
+import Foundation
+#if canImport(AppKit)
 import AppKit
+#endif
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 enum TerminalThemeStyle: String, Codable, Equatable {
     case system
@@ -75,6 +80,7 @@ struct TerminalThemeColor: Codable, Equatable, Hashable {
         self.init(hex: value)
     }
 
+    #if canImport(AppKit)
     init(nsColor: NSColor) {
         let resolved = nsColor.usingColorSpace(.deviceRGB) ?? NSColor.black
         self.init(
@@ -92,10 +98,13 @@ struct TerminalThemeColor: Codable, Equatable, Hashable {
             alpha: 1
         )
     }
+    #endif
 
+    #if canImport(SwiftUI) && canImport(AppKit)
     var swiftUIColor: Color {
         Color(nsColor: nsColor)
     }
+    #endif
 
     var hexString: String {
         String(format: "#%06X", hexValue)
@@ -176,11 +185,20 @@ struct TerminalThemePreference: Codable, Equatable {
     var resolvedAppearance: TerminalThemeAppearance {
         switch style {
         case .system:
+            #if canImport(AppKit)
+            let systemBackground = TerminalThemeColor(nsColor: NSColor.textBackgroundColor)
+            let systemForeground = TerminalThemeColor(nsColor: NSColor.textColor)
+            #else
+            // Fallback before SwiftCrossUI/Qt palette wiring lands.
+            // The "system" style resolves to graphite-ish defaults on Linux.
+            let systemBackground = TerminalThemeColor(hex: 0x12161D)
+            let systemForeground = TerminalThemeColor(hex: 0xE7ECF3)
+            #endif
             return TerminalThemeAppearance(
                 style: .system,
                 name: "System",
-                backgroundColor: TerminalThemeColor(nsColor: NSColor.textBackgroundColor),
-                foregroundColor: TerminalThemeColor(nsColor: NSColor.textColor),
+                backgroundColor: systemBackground,
+                foregroundColor: systemForeground,
                 ansiPalette: Self.systemPalette,
                 paletteStyle: .system,
                 isCustom: false

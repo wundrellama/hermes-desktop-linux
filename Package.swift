@@ -15,13 +15,19 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "Vendor/SwiftTerm")
+        .package(path: "Vendor/SwiftTerm"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.5.0")
     ],
     targets: [
         .executableTarget(
             name: "HermesDesktop",
             dependencies: [
-                .product(name: "SwiftTerm", package: "SwiftTerm")
+                .product(
+                    name: "SwiftTerm",
+                    package: "SwiftTerm",
+                    condition: .when(platforms: [.macOS])
+                ),
+                .product(name: "Crypto", package: "swift-crypto")
             ],
             path: "Sources/HermesDesktop",
             resources: [
