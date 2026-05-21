@@ -1,0 +1,4 @@
+# Build outputs of build-smoke.sh
+smoke
+smoke.o
+smoke.autolink
