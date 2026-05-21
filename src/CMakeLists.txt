@@ -4,15 +4,19 @@ qt_add_executable(hermes-desktop
     main.cpp
     HermesCoreBridge.cpp
     HermesCoreBridge.h
+    ConnectionsModel.cpp
+    ConnectionsModel.h
 )
 
 # Modern Qt6 QML packaging. Generates qmldir + ahead-of-time-compiles
-# Main.qml and registers it under qrc:/qt/qml/HermesDesktop/Main.qml.
+# each listed QML file. Files in the same module reference each other
+# by type name (e.g. Main.qml does `ConnectionsPage {}`).
 qt_add_qml_module(hermes-desktop
     URI HermesDesktop
     VERSION 1.0
     QML_FILES
         Main.qml
+        ConnectionsPage.qml
 )
 
 target_include_directories(hermes-desktop PRIVATE

@@ -5,6 +5,7 @@
 // first end-to-end proof that the Swift core, the C ABI, and the
 // Qt6/Kirigami stack actually compose.
 
+#include "ConnectionsModel.h"
 #include "HermesCoreBridge.h"
 
 #include <QApplication>
@@ -34,9 +35,14 @@ int main(int argc, char *argv[]) {
     // Bridge owns the AppPaths handle for the process lifetime.
     HermesCoreBridge bridge;
 
+    // The model reuses the bridge's handle for every CRUD call.
+    ConnectionsModel connectionsModel(&bridge);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("hermesCore"),
                                              &bridge);
+    engine.rootContext()->setContextProperty(QStringLiteral("connectionsModel"),
+                                             &connectionsModel);
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/HermesDesktop/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
