@@ -39,15 +39,19 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS
 
 # KF6 doesn't ship a single aggregator config on Fedora — each
 # component has its own package. List them explicitly.
-find_package(KF6CoreAddons 6.0 REQUIRED)
-find_package(KF6Crash       6.0 REQUIRED)
-find_package(KF6Config      6.0 REQUIRED)
-find_package(KF6Kirigami    6.0 REQUIRED)
+find_package(KF6CoreAddons    6.0 REQUIRED)
+find_package(KF6Crash         6.0 REQUIRED)
+find_package(KF6Config        6.0 REQUIRED)
+find_package(KF6Kirigami      6.0 REQUIRED)
 # KF6I18n provides KLocalizedString + KLocalizedContext (the QML
 # `i18n()` function lives there). Without it `i18n("…")` returns
 # undefined and Kirigami hides actions whose text is empty, which
 # manifests as a blank-looking sidebar + missing toolbar buttons.
-find_package(KF6I18n        6.0 REQUIRED)
+find_package(KF6I18n          6.0 REQUIRED)
+# KF6ConfigWidgets provides KStandardShortcut, which yields the
+# user's configured Quit / About / etc. key sequences from KDE's
+# Global Shortcuts settings.
+find_package(KF6ConfigWidgets 6.0 REQUIRED)
 
 qt_standard_project_setup(REQUIRES 6.7)
 

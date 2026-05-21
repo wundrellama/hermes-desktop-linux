@@ -5,6 +5,7 @@
 // first end-to-end proof that the Swift core, the C ABI, and the
 // Qt6/Kirigami stack actually compose.
 
+#include "AppController.h"
 #include "ConnectionsModel.h"
 #include "HermesCoreBridge.h"
 
@@ -46,6 +47,10 @@ int main(int argc, char *argv[]) {
     // The model reuses the bridge's handle for every CRUD call.
     ConnectionsModel connectionsModel(&bridge);
 
+    // Application-wide commands (quit, about) + their KDE-canonical
+    // key sequences.
+    AppController appController;
+
     QQmlApplicationEngine engine;
     // Install KLocalizedContext as the engine-wide context object so QML
     // can call i18n() everywhere without per-file imports.
@@ -54,6 +59,8 @@ int main(int argc, char *argv[]) {
                                              &bridge);
     engine.rootContext()->setContextProperty(QStringLiteral("connectionsModel"),
                                              &connectionsModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("appController"),
+                                             &appController);
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/HermesDesktop/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {

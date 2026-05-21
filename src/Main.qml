@@ -21,6 +21,38 @@ Kirigami.ApplicationWindow {
     /// Selected sidebar section identifier; matches macOS AppSection rawValues.
     property string currentSection: "overview"
 
+    // ----- Application-wide shortcuts -----
+    // Quit via KStandardShortcut-derived sequence (defaults Ctrl+Q on KDE).
+    Shortcut {
+        sequences: [appController.quitShortcut, StandardKey.Quit]
+        onActivated: appController.quit()
+    }
+    // About → navigate to Overview, which is where version + paths live.
+    Shortcut {
+        sequence: appController.aboutShortcut
+        onActivated: root.currentSection = "overview"
+    }
+    Connections {
+        target: appController
+        function onAboutRequested() {
+            root.currentSection = "overview"
+        }
+    }
+
+    // Section navigation shortcuts (Ctrl+1..0). Matches the macOS app's
+    // HermesDesktopCommands keyboard map: 1=Connections (was), 2=Overview,
+    // ... we keep the same ordering Linux-side for muscle memory.
+    Shortcut { sequence: "Ctrl+1"; onActivated: root.currentSection = "connections" }
+    Shortcut { sequence: "Ctrl+2"; onActivated: root.currentSection = "overview" }
+    Shortcut { sequence: "Ctrl+3"; onActivated: root.currentSection = "sessions" }
+    Shortcut { sequence: "Ctrl+4"; onActivated: root.currentSection = "workflows" }
+    Shortcut { sequence: "Ctrl+5"; onActivated: root.currentSection = "cronjobs" }
+    Shortcut { sequence: "Ctrl+6"; onActivated: root.currentSection = "kanban" }
+    Shortcut { sequence: "Ctrl+7"; onActivated: root.currentSection = "files" }
+    Shortcut { sequence: "Ctrl+8"; onActivated: root.currentSection = "usage" }
+    Shortcut { sequence: "Ctrl+9"; onActivated: root.currentSection = "skills" }
+    Shortcut { sequence: "Ctrl+0"; onActivated: root.currentSection = "terminal" }
+
     pageStack.initialPage: Loader {
         id: sectionLoader
         active: true

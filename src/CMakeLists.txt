@@ -6,6 +6,8 @@ qt_add_executable(hermes-desktop
     HermesCoreBridge.h
     ConnectionsModel.cpp
     ConnectionsModel.h
+    AppController.cpp
+    AppController.h
 )
 
 # Modern Qt6 QML packaging. Generates qmldir + ahead-of-time-compiles
@@ -37,6 +39,7 @@ target_link_libraries(hermes-desktop PRIVATE
     KF6::Crash
     KF6::Kirigami
     KF6::I18n
+    KF6::ConfigWidgets
 )
 
 # Swift core static library + the runtime libs swiftc would otherwise
