@@ -43,8 +43,10 @@ distrobox enter hermes-build -- sudo dnf install -y \
   kf6-kirigami-addons-devel \
   qtermwidget-devel \
   clang-tools-extra valgrind \
-  git
+  git zsh
 ```
+
+(`zsh` is needed by `Tests/HermesDesktopTests/ConnectionProfileTests.swift::wrappedBootstrapRunsCleanlyUnderZshShell()`. Without it, that one test fails on Linux.)
 
 **Gotchas discovered in setup:**
 - Fedora 41 ships the Qt6 build of QTermWidget under just `qtermwidget-devel` (no `qt6` suffix). Confirm: `dnf search qtermwidget`.
@@ -152,6 +154,15 @@ Every other compile error in the build log is a cascade from `AppState` failing 
 3. Either decouple `AppState.swift` from the Linux build entirely (since it's UI orchestration state), or extract its non-UI parts to a separate file in `Services/`.
 
 That's a much smaller surgical change than the original plan anticipated.
+
+### Library split landed (commit pending)
+
+Final state after the Phase 1 library split:
+- `swift build` produces `.build/x86_64-unknown-linux-gnu/debug/libHermesCore.a` cleanly, 0 errors.
+- `swift test` runs **109 tests across 20 suites — all green** on Linux.
+- Excluded from the Linux target (still built on macOS, still tracked in upstream): `App/`, `Views/`, `Services/Terminal/`, `Services/Storage/ConnectionStore.swift`, `Models/SessionTUIModels.swift`, `Models/TerminalTabModel.swift`.
+- Excluded test files on Linux (test the excluded sources): `ConnectionStoreTests.swift`, `WorkflowPersistenceTests.swift`, `TerminalWorkspaceStoreTests.swift`, `TerminalInputSequenceTests.swift`, `AppSectionTests.swift`, `AppStateUpdateCheckTests.swift`.
+- Other small Linux-specific fixes applied: AppSection `navigationShortcutKey` gated behind `canImport(SwiftUI)`; `DateFormatters.relativeFormatter()` gated behind `#if !os(Linux)` (RelativeDateTimeFormatter is not in swift-corelibs-foundation); `UpdateCheckService.swift` adds `import FoundationNetworking` on Linux (URLRequest/URLSession live there); `WorkflowLaunchDiagnostics.swift` got a minimal `LinuxLoggerShim.swift` companion that mirrors the OSLog `Logger` surface we use; `TestSupport.swift` switched `CryptoKit → Crypto`.
 
 ## CMake configs confirmed present
 

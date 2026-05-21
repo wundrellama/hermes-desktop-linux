@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// On swift-corelibs-foundation (Linux), URLRequest / URLSession live in
+// FoundationNetworking, separate from the core Foundation module.
+import FoundationNetworking
+#endif
 
 struct UpdateCheckService: Sendable {
     static let hermesDesktopLatestReleaseURL = URL(

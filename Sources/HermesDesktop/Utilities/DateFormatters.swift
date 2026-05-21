@@ -9,11 +9,15 @@ extension ISO8601DateFormatter {
 }
 
 enum DateFormatters {
+    #if !os(Linux)
+    // RelativeDateTimeFormatter is not available in swift-corelibs-foundation
+    // as of Swift 6.3. UI callers (Views/) are macOS-only, so this is gated.
     static func relativeFormatter() -> RelativeDateTimeFormatter {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter
     }
+    #endif
 
     static func shortDateTimeFormatter() -> DateFormatter {
         let cacheKey = "HermesDesktop.shortDateTimeFormatter"

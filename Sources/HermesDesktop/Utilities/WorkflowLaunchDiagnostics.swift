@@ -1,6 +1,8 @@
 import Crypto
 import Foundation
+#if canImport(OSLog)
 import OSLog
+#endif
 
 struct WorkflowLaunchDiagnosticsContext: Sendable {
     let runID: UUID
@@ -254,7 +256,11 @@ actor WorkflowLaunchDiagnostics {
         fileManager: FileManager,
         logFileURL: URL
     ) {
+        #if canImport(OSLog)
         logger.notice("\(line, privacy: .public)")
+        #else
+        logger.notice(line)
+        #endif
 
         let payload = Data((line + "\n").utf8)
         if !fileManager.fileExists(atPath: logFileURL.path) {

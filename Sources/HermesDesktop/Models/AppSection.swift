@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 
 enum AppSection: String, CaseIterable, Identifiable {
     case connections
@@ -69,6 +71,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         }
     }
 
+    #if canImport(SwiftUI)
     var navigationShortcutKey: KeyEquivalent {
         switch self {
         case .connections:
@@ -93,4 +96,5 @@ enum AppSection: String, CaseIterable, Identifiable {
             return "0"
         }
     }
+    #endif
 }
