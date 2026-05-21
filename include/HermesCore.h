@@ -226,6 +226,84 @@ int32_t hermes_preferences_save(
     const char *preferences_json
 );
 
+/* ===== SSH execution (async) ===== */
+
+typedef int64_t hermes_request_id_t;
+
+/*
+ * Async callback signature. Swift invokes this exactly once per
+ * successful hermes_ssh_execute call, regardless of outcome.
+ *
+ * Threading: the callback fires on a Swift cooperative-pool worker —
+ * effectively a random background thread. The C++ Qt UI must NOT
+ * touch QObjects directly from inside the callback; instead, marshal
+ * onto Qt's main thread via:
+ *
+ *   QMetaObject::invokeMethod(qApp,
+ *       [req, payload_copy, user]() { ... },
+ *       Qt::QueuedConnection);
+ *
+ * Memory ownership: result_json is heap-allocated by Swift via strdup.
+ * The callback MUST free it via hermes_free_string. (If the callback
+ * defers processing by copying into a Qt thread-hop closure, the
+ * thread-hop closure becomes responsible for the free.)
+ *
+ * `user` is whatever opaque pointer was passed at submission time —
+ * Swift never inspects or retains it. The C++ side must keep what
+ * `user` points at alive until the callback fires.
+ *
+ * result_json wire format:
+ *
+ *   on success:
+ *     { "ok": true,
+ *       "data": { "stdout": "...", "stderr": "...", "exitCode": 0 } }
+ *
+ *   on failure:
+ *     { "ok": false,
+ *       "error": { "code": "<stable-code>", "message": "..." } }
+ *
+ *   Stable error codes: "invalidConnection", "launchFailure",
+ *   "localFailure", "remoteFailure", "invalidResponse", "internal".
+ */
+typedef void (*hermes_async_cb_t)(
+    hermes_request_id_t req,
+    const char *result_json,
+    void *user
+);
+
+/*
+ * Submit an SSH command. The remote command is executed against the
+ * given ConnectionProfile via the same `/usr/bin/ssh` path the macOS
+ * app uses (Foundation Process under the hood). Returns the
+ * non-zero request_id immediately, or 0 on a synchronous failure
+ * (invalid AppPaths handle, malformed connection_json, missing
+ * remote_command, or NULL cb).
+ *
+ * Arguments:
+ *   handle           — AppPaths handle from hermes_apppaths_init.
+ *   connection_json  — single ConnectionProfile JSON (see Connections
+ *                      section for the wire shape).
+ *   remote_command   — shell command line to run on the remote host.
+ *   allocate_tty     — 0 for no TTY, non-zero for `-tt` (interactive).
+ *   stdin_data       — UTF-8 stdin to pipe in, or NULL for no stdin.
+ *   cb               — async callback (must be non-NULL).
+ *   user             — opaque context pointer passed back to cb.
+ *
+ * Cancellation is NOT yet implemented. A future revision will add
+ * hermes_request_cancel(handle, req) that propagates a Process
+ * terminate to the underlying ssh. Today you cannot abort an
+ * in-flight request.
+ */
+hermes_request_id_t hermes_ssh_execute(
+    hermes_handle_t handle,
+    const char *connection_json,
+    const char *remote_command,
+    int32_t allocate_tty,
+    const char *stdin_data,
+    hermes_async_cb_t cb,
+    void *user
+);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

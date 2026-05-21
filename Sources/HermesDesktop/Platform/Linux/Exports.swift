@@ -290,6 +290,113 @@ public func hermes_preferences_save(
     }
 }
 
+// MARK: - SSH execution (async)
+//
+// The first async-callback FFI surface. C++ calls hermes_ssh_execute,
+// gets a non-zero request_id back immediately, and later receives the
+// SSHResultEnvelope JSON via the supplied callback. The callback may
+// fire on any thread (specifically: a Swift cooperative-pool worker);
+// the C++ side is responsible for marshaling onto Qt's main thread
+// via QMetaObject::invokeMethod(qApp, ..., Qt::QueuedConnection).
+//
+// Memory ownership of the JSON payload passed to the callback follows
+// the same rule as every other hermes_* char* return: the C++ side
+// MUST free it via hermes_free_string. The Swift side allocates with
+// strdup once and does not retain a reference after the callback
+// returns.
+//
+// `user` is opaque to the Swift side — passed through verbatim. The
+// C++ side must keep whatever it points at alive until the callback
+// fires.
+//
+// Cancellation is NOT implemented in v1. A future revision will add
+// hermes_request_cancel plus Process.terminate() plumbing inside
+// SSHTransport so the underlying /usr/bin/ssh actually dies. Today
+// you cannot abort an in-flight request.
+
+/// Submit an SSH command. Returns the request_id (non-zero) on success,
+/// or 0 on a synchronous failure (invalid handle, malformed
+/// connection_json, or missing remote_command).
+///
+/// `connection_json` must encode a single ConnectionProfile.
+/// `remote_command` is the command line to execute on the remote host.
+/// `allocate_tty` is a boolean (0 / non-zero) controlling SSH's `-tt`.
+/// `stdin_data` is optional UTF-8 stdin (NULL for none).
+///
+/// The callback type is inlined here (rather than a separate typealias)
+/// because @_cdecl public functions cannot reference internal-typealias
+/// parameter types under Swift 6 strict visibility checking.
+@_cdecl("hermes_ssh_execute")
+public func hermes_ssh_execute(
+    _ pathsHandle: Int64,
+    _ connectionJson: UnsafePointer<CChar>?,
+    _ remoteCommand: UnsafePointer<CChar>?,
+    _ allocateTTY: Int32,
+    _ stdinData: UnsafePointer<CChar>?,
+    _ cb: (@convention(c) (Int64, UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void)?,
+    _ user: UnsafeMutableRawPointer?
+) -> Int64 {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return 0
+    }
+    guard let profile: ConnectionProfile = JsonBridge.consume(connectionJson) else {
+        return 0
+    }
+    guard let remoteCommand else {
+        return 0
+    }
+    guard let cb else {
+        // No callback = no way to deliver the result; bail synchronously.
+        return 0
+    }
+    let command = String(cString: remoteCommand)
+    let stdinBytes: Data? = stdinData.map { Data(String(cString: $0).utf8) }
+    let tty = allocateTTY != 0
+    let requestId = RequestID.allocate()
+
+    // UnsafeMutableRawPointer is @unchecked Sendable; @convention(c) function
+    // pointers are POD. Both cross the Task boundary cleanly.
+    let userBox = UncheckedSendableBox(user)
+
+    Task.detached { @Sendable [paths, profile, command, stdinBytes, tty, requestId, userBox] in
+        let transport = SSHTransport(paths: paths)
+        let envelope: SSHResultEnvelope
+        do {
+            let result = try await transport.execute(
+                on: profile,
+                remoteCommand: command,
+                standardInput: stdinBytes,
+                allocateTTY: tty
+            )
+            envelope = .success(
+                SSHCommandResultPayload(
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    exitCode: result.exitCode
+                )
+            )
+        } catch {
+            envelope = .from(error: error)
+        }
+
+        // Build the JSON payload. Ownership transfers to the C side on
+        // callback invocation; C must free with hermes_free_string.
+        let payload = JsonBridge.emit(envelope)
+        cb(requestId, payload, userBox.value)
+    }
+
+    return requestId
+}
+
+/// Tiny wrapper to silence the Swift 6 Sendable checker for the
+/// raw pointer crossing the Task boundary. The pointer is opaque on
+/// the Swift side and only handed back to C; treating it as
+/// @unchecked Sendable is honest.
+private struct UncheckedSendableBox: @unchecked Sendable {
+    let value: UnsafeMutableRawPointer?
+    init(_ value: UnsafeMutableRawPointer?) { self.value = value }
+}
+
 // MARK: - Private helpers
 
 private func defaultApplicationSupportURL() -> URL {

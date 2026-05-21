@@ -27,7 +27,8 @@ swiftc \
   -o tests/ffi/smoke \
   tests/ffi/smoke.o \
   "$LIB" \
-  -Xlinker -lstdc++   # swift-crypto's BoringSSL pulls in C++ std::terminate
+  -Xlinker -lstdc++ \
+  -Xlinker -lpthread   # smoke.c uses pthread_cond for async SSH coordination
 rm -f tests/ffi/smoke.o
 
 echo "Built tests/ffi/smoke"

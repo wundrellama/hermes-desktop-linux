@@ -22,11 +22,13 @@
 
 #include "HermesCore.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 static int failures = 0;
@@ -66,6 +68,48 @@ static void rmrf(const char *path) {
     snprintf(cmd, sizeof(cmd), "rm -rf %s", path);
     int rc = system(cmd);
     (void)rc;  /* tolerate missing dir */
+}
+
+/* Shared state for the async SSH smoke. The callback fires on a Swift
+ * cooperative-pool worker; we coordinate with main() via a condvar.
+ */
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cond;
+    int fired;
+    hermes_request_id_t observed_req;
+    char *result_copy;
+} ssh_smoke_state_t;
+
+static void ssh_smoke_cb(hermes_request_id_t req,
+                         const char *result_json,
+                         void *user) {
+    ssh_smoke_state_t *s = (ssh_smoke_state_t *)user;
+    pthread_mutex_lock(&s->mu);
+    s->fired = 1;
+    s->observed_req = req;
+    /* Defensive copy — Swift owns result_json until we hermes_free_string,
+     * but we also want main() to inspect it after we return. */
+    s->result_copy = result_json ? strdup(result_json) : NULL;
+    /* Release Swift's allocation now per the documented ownership rule. */
+    hermes_free_string((char *)result_json);
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->mu);
+}
+
+static int wait_for_callback(ssh_smoke_state_t *s, int timeout_seconds) {
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += timeout_seconds;
+
+    pthread_mutex_lock(&s->mu);
+    int rc = 0;
+    while (!s->fired && rc == 0) {
+        rc = pthread_cond_timedwait(&s->cond, &s->mu, &deadline);
+    }
+    int fired = s->fired;
+    pthread_mutex_unlock(&s->mu);
+    return fired;
 }
 
 int main(void) {
@@ -340,6 +384,85 @@ int main(void) {
 
     hermes_apppaths_release(ps);
     rmrf("/tmp/hermes-smoke-prefs/HermesDesktop");
+
+    /* =====================================================================
+     * SSH async submit + callback. Uses an intentionally empty
+     * ConnectionProfile so SSHTransport throws invalidConnection
+     * BEFORE spawning /usr/bin/ssh — tests the full FFI plumbing
+     * without depending on openssh-clients being present.
+     * ===================================================================== */
+    printf("\n--- ssh async ---\n");
+
+    rmrf("/tmp/hermes-smoke-ssh/HermesDesktop");
+    hermes_handle_t sshHandle = hermes_apppaths_init("/tmp/hermes-smoke-ssh", NULL);
+    check_handle("hermes_apppaths_init(ssh)", sshHandle);
+
+    /* Synchronous failure: bad connection_json → 0 request_id. */
+    if (hermes_ssh_execute(sshHandle, "{nope}", "echo hi", 0, NULL,
+                           ssh_smoke_cb, NULL) != 0) {
+        fprintf(stderr, "FAIL: ssh submit with bad json should return 0\n");
+        failures++;
+    }
+
+    /* Synchronous failure: NULL callback → 0 request_id. */
+    if (hermes_ssh_execute(sshHandle,
+                           "{\"id\":\"00000000-0000-0000-0000-000000000000\","
+                           "\"label\":\"\",\"sshAlias\":\"\",\"sshHost\":\"\","
+                           "\"sshUser\":\"\",\"createdAt\":\"2026-05-20T00:00:00Z\","
+                           "\"updatedAt\":\"2026-05-20T00:00:00Z\"}",
+                           "echo hi", 0, NULL, NULL, NULL) != 0) {
+        fprintf(stderr, "FAIL: ssh submit with NULL cb should return 0\n");
+        failures++;
+    }
+
+    /* Async failure path: empty profile → invalidConnection in the callback. */
+    ssh_smoke_state_t state = {
+        .mu = PTHREAD_MUTEX_INITIALIZER,
+        .cond = PTHREAD_COND_INITIALIZER,
+        .fired = 0,
+        .observed_req = 0,
+        .result_copy = NULL,
+    };
+    const char *empty_profile =
+        "{"
+        "\"id\":\"00000000-0000-0000-0000-000000000000\","
+        "\"label\":\"\","
+        "\"sshAlias\":\"\","
+        "\"sshHost\":\"\","
+        "\"sshUser\":\"\","
+        "\"createdAt\":\"2026-05-20T00:00:00Z\","
+        "\"updatedAt\":\"2026-05-20T00:00:00Z\""
+        "}";
+    hermes_request_id_t req = hermes_ssh_execute(
+        sshHandle, empty_profile, "echo hi", 0, NULL, ssh_smoke_cb, &state);
+    if (req == 0) {
+        fprintf(stderr, "FAIL: ssh submit returned 0 request_id\n");
+        failures++;
+    } else {
+        printf("submitted req=%lld\n", (long long)req);
+    }
+
+    if (!wait_for_callback(&state, 10)) {
+        fprintf(stderr, "FAIL: ssh callback didn't fire within 10s\n");
+        failures++;
+    } else {
+        if (state.observed_req != req) {
+            fprintf(stderr, "FAIL: callback req mismatch: %lld vs %lld\n",
+                    (long long)state.observed_req, (long long)req);
+            failures++;
+        }
+        check_substring("ssh err: ok:false", state.result_copy, "\"ok\":false");
+        check_substring("ssh err: code=invalidConnection",
+                        state.result_copy, "\"code\":\"invalidConnection\"");
+        printf("callback payload = %s\n",
+               state.result_copy ? state.result_copy : "(null)");
+    }
+    free(state.result_copy);
+    pthread_mutex_destroy(&state.mu);
+    pthread_cond_destroy(&state.cond);
+
+    hermes_apppaths_release(sshHandle);
+    rmrf("/tmp/hermes-smoke-ssh/HermesDesktop");
 
     if (failures == 0) {
         printf("OK — all smoke checks passed\n");
