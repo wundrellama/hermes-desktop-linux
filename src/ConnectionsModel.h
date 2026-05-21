@@ -4,7 +4,9 @@
 #include "HermesCoreBridge.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QList>
+#include <QMutex>
 #include <QString>
 #include <QVariantMap>
 
@@ -31,8 +33,17 @@ public:
         CreatedAtRole,
         UpdatedAtRole,
         LastConnectedAtRole,
-        DisplayTargetRole,   // computed: "user@host[:port]" or alias
-        DisplaySubtitleRole, // computed: "alias · hermesProfile" or similar
+        DisplayTargetRole,         // computed: "user@host[:port]" or alias
+        DisplaySubtitleRole,       // computed: "alias · hermesProfile" or similar
+        ConnectionStatusRole,      // "idle" | "running" | "success" | "failed"
+        ConnectionStatusMessageRole, // human-readable result on success/failed
+    };
+
+    enum ConnectionStatus {
+        StatusIdle = 0,
+        StatusRunning,
+        StatusSuccess,
+        StatusFailed,
     };
 
     explicit ConnectionsModel(HermesCoreBridge *bridge, QObject *parent = nullptr);
@@ -61,13 +72,45 @@ public:
     /// Returns true on success.
     Q_INVOKABLE bool removeProfile(const QString &id);
 
+    /// Kick off an SSH connectivity test against the given connection id.
+    /// Runs `echo hermes-connectivity-check` over the profile and updates
+    /// the row's connectionStatus / connectionStatusMessage on completion.
+    /// Returns immediately; the result lands asynchronously.
+    Q_INVOKABLE void testConnection(const QString &id);
+
 private:
     HermesCoreBridge *m_bridge;
     QList<QVariantMap> m_rows;
+
+    // Per-id status state, keyed by ConnectionProfile.id (UUID string).
+    // Reads happen on the QML thread inside data(); writes happen on the
+    // QML thread inside testConnection() (kick-off) and inside the
+    // queued slot that fires after the async callback marshals back.
+    QHash<QString, ConnectionStatus> m_status;
+    QHash<QString, QString> m_statusMessage;
+
+    // In-flight async requests. Touched from BOTH the QML thread
+    // (insert at submit; lookup at result) AND the Swift callback
+    // thread (take at result, before queuing to QML thread). Guarded
+    // by m_inflightMutex.
+    QHash<qint64, QString> m_inflight;
+    QMutex m_inflightMutex;
 
     // Helper: convert a QVariantMap row to the JSON the FFI expects.
     QString rowToJson(const QVariantMap &row) const;
     // Helper: build the row's display target string (alias or user@host).
     static QString computeDisplayTarget(const QVariantMap &row);
     static QString computeDisplaySubtitle(const QVariantMap &row);
+    // Look up a row by its UUID. Returns -1 if not present.
+    int rowIndexForId(const QString &id) const;
+
+    // Static C callback hooked into hermes_ssh_execute. Fires on a
+    // Swift cooperative-pool worker — marshals back to the QML thread.
+    static void asyncCallback(int64_t req, const char *resultJson, void *user);
+
+    // QML-thread slot that interprets the result JSON and updates state.
+    Q_INVOKABLE void handleTestResult(const QString &id, const QString &resultJson);
+
+    // Persist the new status + emit dataChanged for the matching row.
+    void setStatus(const QString &id, ConnectionStatus status, const QString &message);
 };

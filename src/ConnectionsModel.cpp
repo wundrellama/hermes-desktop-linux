@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMetaObject>
+#include <QMutexLocker>
 #include <QUuid>
 
 namespace {
@@ -60,6 +62,20 @@ QVariant ConnectionsModel::data(const QModelIndex &index, int role) const {
         case LastConnectedAtRole:       return row.value("lastConnectedAt");
         case DisplayTargetRole:         return computeDisplayTarget(row);
         case DisplaySubtitleRole:       return computeDisplaySubtitle(row);
+        case ConnectionStatusRole: {
+            const QString id = row.value("id").toString();
+            switch (m_status.value(id, StatusIdle)) {
+                case StatusIdle:    return QStringLiteral("idle");
+                case StatusRunning: return QStringLiteral("running");
+                case StatusSuccess: return QStringLiteral("success");
+                case StatusFailed:  return QStringLiteral("failed");
+            }
+            return QStringLiteral("idle");
+        }
+        case ConnectionStatusMessageRole: {
+            const QString id = row.value("id").toString();
+            return m_statusMessage.value(id);
+        }
         default:                        return {};
     }
 }
@@ -79,6 +95,8 @@ QHash<int, QByteArray> ConnectionsModel::roleNames() const {
         {LastConnectedAtRole,       "lastConnectedAt"},
         {DisplayTargetRole,         "displayTarget"},
         {DisplaySubtitleRole,       "displaySubtitle"},
+        {ConnectionStatusRole,      "connectionStatus"},
+        {ConnectionStatusMessageRole, "connectionStatusMessage"},
     };
 }
 
@@ -243,6 +261,147 @@ QString ConnectionsModel::computeDisplayTarget(const QVariantMap &row) {
         target += QStringLiteral(":") + QString::number(row.value("sshPort").toInt());
     }
     return target;
+}
+
+int ConnectionsModel::rowIndexForId(const QString &id) const {
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (m_rows.at(i).value("id").toString() == id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void ConnectionsModel::setStatus(const QString &id,
+                                 ConnectionStatus status,
+                                 const QString &message) {
+    if (status == StatusIdle) {
+        m_status.remove(id);
+        m_statusMessage.remove(id);
+    } else {
+        m_status[id] = status;
+        m_statusMessage[id] = message;
+    }
+    const int row = rowIndexForId(id);
+    if (row >= 0) {
+        const QModelIndex idx = index(row);
+        emit dataChanged(idx, idx,
+                         {ConnectionStatusRole, ConnectionStatusMessageRole});
+    }
+}
+
+void ConnectionsModel::testConnection(const QString &id) {
+    const int row = rowIndexForId(id);
+    if (row < 0) {
+        qWarning() << "testConnection: unknown id" << id;
+        return;
+    }
+    const QVariantMap profile = m_rows.at(row);
+
+    const hermes_handle_t handle = m_bridge ? m_bridge->pathsHandle() : 0;
+    if (handle == 0) {
+        setStatus(id, StatusFailed, tr("No HermesCore handle."));
+        return;
+    }
+
+    // The Swift JSONDecoder.iso8601 strategy needs the field shape exactly
+    // as ConnectionPersistence writes it — round-trip through rowToJson
+    // for consistency rather than handing the in-memory QVariantMap raw.
+    const QString profileJson = rowToJson(profile);
+    const QByteArray profileUtf8 = profileJson.toUtf8();
+
+    const char *remoteCommand = "echo hermes-connectivity-check";
+
+    setStatus(id, StatusRunning, QString());
+
+    const int64_t req = hermes_ssh_execute(
+        handle,
+        profileUtf8.constData(),
+        remoteCommand,
+        0,         // no TTY
+        nullptr,   // no stdin
+        &ConnectionsModel::asyncCallback,
+        this);
+
+    if (req == 0) {
+        setStatus(id, StatusFailed,
+                  tr("Submission failed — check the connection fields."));
+        return;
+    }
+
+    QMutexLocker lock(&m_inflightMutex);
+    m_inflight.insert(req, id);
+}
+
+// static — fires on a Swift cooperative-pool worker thread.
+void ConnectionsModel::asyncCallback(int64_t req,
+                                     const char *resultJson,
+                                     void *user) {
+    auto *self = static_cast<ConnectionsModel *>(user);
+    const QString payload = resultJson ? QString::fromUtf8(resultJson) : QString();
+    if (resultJson) {
+        // Per the HermesCore.h ownership contract.
+        hermes_free_string(const_cast<char *>(resultJson));
+    }
+
+    QString id;
+    {
+        QMutexLocker lock(&self->m_inflightMutex);
+        id = self->m_inflight.take(req);
+    }
+    if (id.isEmpty()) {
+        // Spurious / late callback (handle reused after release, etc.).
+        return;
+    }
+
+    // Marshal onto the QML/Qt main thread. handleTestResult is a
+    // Q_INVOKABLE slot on self — the cross-thread invocation is safe.
+    QMetaObject::invokeMethod(
+        self,
+        [self, id, payload]() { self->handleTestResult(id, payload); },
+        Qt::QueuedConnection);
+}
+
+void ConnectionsModel::handleTestResult(const QString &id,
+                                        const QString &resultJson) {
+    QJsonParseError err{};
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(resultJson.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        setStatus(id, StatusFailed,
+                  tr("Invalid response from core: %1").arg(err.errorString()));
+        return;
+    }
+    const QJsonObject obj = doc.object();
+    const bool ok = obj.value(QStringLiteral("ok")).toBool(false);
+
+    if (ok) {
+        const QJsonObject data =
+            obj.value(QStringLiteral("data")).toObject();
+        const int exitCode =
+            data.value(QStringLiteral("exitCode")).toInt(-1);
+        if (exitCode == 0) {
+            setStatus(id, StatusSuccess,
+                      tr("Connected — echo round-trip succeeded."));
+        } else {
+            const QString stderr_ =
+                data.value(QStringLiteral("stderr")).toString();
+            setStatus(id, StatusFailed,
+                      tr("Remote exited %1: %2")
+                          .arg(exitCode)
+                          .arg(stderr_.left(160)));
+        }
+        return;
+    }
+
+    const QJsonObject error =
+        obj.value(QStringLiteral("error")).toObject();
+    const QString code =
+        error.value(QStringLiteral("code")).toString();
+    const QString message =
+        error.value(QStringLiteral("message")).toString();
+    setStatus(id, StatusFailed,
+              tr("%1: %2").arg(code, message));
 }
 
 QString ConnectionsModel::computeDisplaySubtitle(const QVariantMap &row) {

@@ -88,6 +88,57 @@ Kirigami.ScrollablePage {
                     }
                 }
 
+                // Status indicator: idle (nothing) / running (spinner) /
+                // success (green check) / failed (red X with tooltip).
+                Item {
+                    id: statusIndicator
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                    visible: model.connectionStatus !== "idle"
+
+                    BusyIndicator {
+                        anchors.fill: parent
+                        visible: model.connectionStatus === "running"
+                        running: visible
+                    }
+                    Kirigami.Icon {
+                        anchors.fill: parent
+                        visible: model.connectionStatus === "success"
+                        source: "emblem-success"
+
+                        MouseArea {
+                            id: successHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                        }
+                        ToolTip.visible: successHover.containsMouse
+                        ToolTip.text: model.connectionStatusMessage
+                    }
+                    Kirigami.Icon {
+                        anchors.fill: parent
+                        visible: model.connectionStatus === "failed"
+                        source: "emblem-error"
+
+                        MouseArea {
+                            id: failedHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                        }
+                        ToolTip.visible: failedHover.containsMouse
+                        ToolTip.text: model.connectionStatusMessage
+                    }
+                }
+
+                Button {
+                    icon.name: "network-connect"
+                    flat: true
+                    enabled: model.connectionStatus !== "running"
+                    ToolTip.visible: hovered
+                    ToolTip.text: i18n("Test connection (echo round-trip)")
+                    onClicked: connectionsModel.testConnection(model.id)
+                }
                 Button {
                     icon.name: "document-edit"
                     flat: true
