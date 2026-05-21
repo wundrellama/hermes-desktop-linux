@@ -99,6 +99,138 @@ public func hermes_apppaths_release(_ handle: Int64) {
     HandleRegistry.shared.release(handle)
 }
 
+// MARK: - Connection storage
+//
+// The handle here is the AppPaths handle returned by hermes_apppaths_init.
+// ConnectionPersistence is a stateless file-IO struct, so each call builds
+// a fresh instance — no caching, no shared mutable state.
+//
+// JSON wire format mirrors ConnectionProfile's Codable surface:
+//   { "id": "<uuid>", "label": ..., "sshAlias": ..., "sshHost": ...,
+//     "sshPort": <int|null>, "sshUser": ..., "hermesProfile": <string|null>,
+//     "customHermesHomePath": <string|null>, "createdAt": "<iso8601>",
+//     "updatedAt": "<iso8601>", "lastConnectedAt": "<iso8601|null>" }
+//
+// Status codes:
+//    0   success
+//   -1   invalid AppPaths handle
+//   -2   JSON parse / invalid argument (bad UUID, malformed payload)
+//   -3   I/O failure (disk full, permissions, etc.) — future revision
+//        will surface a structured error via a separate getter.
+
+/// Returns the saved connections as a JSON array.
+/// On absence of the file, returns an empty array (not NULL). NULL is
+/// reserved for "invalid handle" or unexpected I/O failure.
+/// Caller frees via `hermes_free_string`.
+@_cdecl("hermes_connection_list")
+public func hermes_connection_list(_ pathsHandle: Int64) -> UnsafeMutablePointer<CChar>? {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return nil
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    do {
+        let connections = try persistence.loadConnections()
+        return JsonBridge.emit(connections)
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        return JsonBridge.emit([ConnectionProfile]())
+    } catch {
+        return nil
+    }
+}
+
+/// Returns the single connection with `id`, or NULL if not found / not loadable.
+/// Caller frees via `hermes_free_string`.
+@_cdecl("hermes_connection_load")
+public func hermes_connection_load(
+    _ pathsHandle: Int64,
+    _ idCString: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>? {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return nil
+    }
+    guard let idCString,
+          let id = UUID(uuidString: String(cString: idCString)) else {
+        return nil
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    do {
+        let all = try persistence.loadConnections()
+        guard let match = all.first(where: { $0.id == id }) else { return nil }
+        return JsonBridge.emit(match)
+    } catch {
+        return nil
+    }
+}
+
+/// Upserts a connection. The payload is a single ConnectionProfile JSON
+/// (NOT an array). An existing profile with the same `id` is replaced;
+/// otherwise the profile is appended. The Swift side does not sort or
+/// normalize — that's the UI's responsibility.
+@_cdecl("hermes_connection_save")
+public func hermes_connection_save(
+    _ pathsHandle: Int64,
+    _ profileJson: UnsafePointer<CChar>?
+) -> Int32 {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return -1
+    }
+    guard let incoming: ConnectionProfile = JsonBridge.consume(profileJson) else {
+        return -2
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    var current: [ConnectionProfile]
+    do {
+        current = try persistence.loadConnections()
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        current = []
+    } catch {
+        return -3
+    }
+    if let index = current.firstIndex(where: { $0.id == incoming.id }) {
+        current[index] = incoming
+    } else {
+        current.append(incoming)
+    }
+    do {
+        try persistence.saveConnections(current)
+        return 0
+    } catch {
+        return -3
+    }
+}
+
+/// Removes the connection with `id`. Returns 0 even if no such id exists
+/// (idempotent — matches the macOS ConnectionStore.delete semantics).
+@_cdecl("hermes_connection_delete")
+public func hermes_connection_delete(
+    _ pathsHandle: Int64,
+    _ idCString: UnsafePointer<CChar>?
+) -> Int32 {
+    guard let paths = HandleRegistry.shared.lookup(pathsHandle, as: AppPaths.self) else {
+        return -1
+    }
+    guard let idCString,
+          let id = UUID(uuidString: String(cString: idCString)) else {
+        return -2
+    }
+    let persistence = ConnectionPersistence(paths: paths)
+    var current: [ConnectionProfile]
+    do {
+        current = try persistence.loadConnections()
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        return 0  // nothing to delete
+    } catch {
+        return -3
+    }
+    current.removeAll { $0.id == id }
+    do {
+        try persistence.saveConnections(current)
+        return 0
+    } catch {
+        return -3
+    }
+}
+
 // MARK: - Private helpers
 
 private func defaultApplicationSupportURL() -> URL {

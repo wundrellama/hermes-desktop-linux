@@ -99,6 +99,80 @@ char *hermes_apppaths_control_socket_dir(hermes_handle_t handle);
  */
 void hermes_apppaths_release(hermes_handle_t handle);
 
+/* ===== Connections ===== */
+
+/*
+ * Connection storage operates against the AppPaths handle — there is no
+ * separate "connection store" handle. ConnectionPersistence on the Swift
+ * side is stateless file IO, so each call builds a fresh instance.
+ *
+ * JSON wire format for a single ConnectionProfile:
+ *
+ *   {
+ *     "id":                   "8E3A2F4C-...-...-...-...",  // UUID
+ *     "label":                "prod-east-1",
+ *     "sshAlias":             "prod-east",                  // ~/.ssh/config alias
+ *     "sshHost":              "10.0.0.4",
+ *     "sshPort":              22,                            // or null
+ *     "sshUser":              "deploy",
+ *     "hermesProfile":        "researcher",                  // or null
+ *     "customHermesHomePath": "/srv/hermes",                 // or null
+ *     "createdAt":            "2026-05-20T19:00:00Z",        // ISO 8601
+ *     "updatedAt":            "2026-05-20T19:00:00Z",
+ *     "lastConnectedAt":      null                            // or ISO 8601
+ *   }
+ *
+ * Status codes returned by the integer-returning functions below:
+ *
+ *    0   success
+ *   -1   invalid AppPaths handle
+ *   -2   JSON parse failure or malformed argument (bad UUID etc.)
+ *   -3   I/O failure (disk full, permission denied, etc.)
+ *
+ * A future revision will surface structured errors via
+ * `hermes_core_last_error(handle)` returning a JSON payload; for now,
+ * the integer code is the only error channel.
+ */
+
+/*
+ * Returns ALL saved connections as a JSON array. Returns an empty
+ * "[]" string when the file doesn't exist. Returns NULL only on an
+ * invalid handle or unexpected I/O failure.
+ * Caller frees with hermes_free_string.
+ */
+char *hermes_connection_list(hermes_handle_t handle);
+
+/*
+ * Returns the connection with the given UUID string, or NULL if no
+ * such id exists / load failed / the UUID couldn't be parsed.
+ * Caller frees with hermes_free_string.
+ */
+char *hermes_connection_load(hermes_handle_t handle, const char *id);
+
+/*
+ * Upserts a connection. profile_json must encode a single
+ * ConnectionProfile (NOT an array). If an existing profile with the
+ * same id is on disk, it is replaced; otherwise the profile is
+ * appended. The Swift side does not sort, normalize, or validate
+ * fields beyond JSON parsing — that's the UI's job.
+ *
+ * Returns 0 / -1 / -2 / -3 per the status codes above.
+ */
+int32_t hermes_connection_save(
+    hermes_handle_t handle,
+    const char *profile_json
+);
+
+/*
+ * Removes the connection with the given UUID. Idempotent: returns 0
+ * whether or not such an id was on disk. Returns -1 / -2 / -3 on
+ * handle / argument / I/O failure.
+ */
+int32_t hermes_connection_delete(
+    hermes_handle_t handle,
+    const char *id
+);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
