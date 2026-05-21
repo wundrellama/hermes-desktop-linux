@@ -36,6 +36,7 @@ target_link_libraries(hermes-desktop PRIVATE
     KF6::CoreAddons
     KF6::Crash
     KF6::Kirigami
+    KF6::I18n
 )
 
 # Swift core static library + the runtime libs swiftc would otherwise

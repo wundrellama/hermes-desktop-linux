@@ -15,18 +15,30 @@ Kirigami.ScrollablePage {
 
     title: i18n("Connections")
 
-    actions: [
-        Kirigami.Action {
-            icon.name: "list-add"
-            text: i18n("Add connection")
-            onTriggered: editor.openWith(connectionsModel.newProfile())
-        },
-        Kirigami.Action {
-            icon.name: "view-refresh"
-            text: i18n("Refresh")
-            onTriggered: connectionsModel.reload()
-        }
-    ]
+    // NOTE: Kirigami.ScrollablePage.actions: [...] did not surface as
+    // toolbar buttons on Plasma 6.4 / Kirigami 6.18 (Fedora 41). The
+    // page-action pipeline expects the host shell to pull actions and
+    // render them in a global toolbar — and our `Kirigami.GlobalDrawer
+    // { modal: false }` setup doesn't seem to do that. Using an inline
+    // Kirigami.ActionToolBar as the page header is the documented
+    // alternative and renders reliably.
+    header: Kirigami.ActionToolBar {
+        flat: false
+        actions: [
+            Kirigami.Action {
+                icon.name: "list-add"
+                text: i18n("Add connection")
+                displayHint: Kirigami.DisplayHint.KeepVisible
+                onTriggered: editor.openWith(connectionsModel.newProfile())
+            },
+            Kirigami.Action {
+                icon.name: "view-refresh"
+                text: i18n("Refresh")
+                displayHint: Kirigami.DisplayHint.KeepVisible
+                onTriggered: connectionsModel.reload()
+            }
+        ]
+    }
 
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent

@@ -15,6 +15,8 @@
 
 #include <KAboutData>
 #include <KCrash>
+#include <KLocalizedContext>
+#include <KLocalizedString>
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -32,6 +34,12 @@ int main(int argc, char *argv[]) {
     KAboutData::setApplicationData(about);
     KCrash::initialize();
 
+    // Required for the QML `i18n()` / `i18nc()` / `i18np()` helpers and
+    // the underlying KLocalizedString lookup. Without this, every `text:
+    // i18n("...")` in QML evaluates to undefined, and Kirigami hides
+    // toolbar actions / sidebar entries whose text is empty.
+    KLocalizedString::setApplicationDomain("hermes-desktop");
+
     // Bridge owns the AppPaths handle for the process lifetime.
     HermesCoreBridge bridge;
 
@@ -39,6 +47,9 @@ int main(int argc, char *argv[]) {
     ConnectionsModel connectionsModel(&bridge);
 
     QQmlApplicationEngine engine;
+    // Install KLocalizedContext as the engine-wide context object so QML
+    // can call i18n() everywhere without per-file imports.
+    engine.rootContext()->setContextObject(new KLocalizedContext(&engine));
     engine.rootContext()->setContextProperty(QStringLiteral("hermesCore"),
                                              &bridge);
     engine.rootContext()->setContextProperty(QStringLiteral("connectionsModel"),
