@@ -1,6 +1,8 @@
 # Phase 0 spike — SwiftCrossUI + Gtk4 viability gate
 
-This directory holds the artifacts for the **2-week Phase 0 spike** that gates the Swift-keeping port of `hermes-desktop` to Linux. See the parent plan at
+> ⚠️ **Outcome 2026-05-20**: The spike triggered a **strategy pivot, not a continuation**. SwiftCrossUI+GtkBackend would have worked (~85% API coverage, three patchable gaps) but the user opted to **pivot to Hybrid: Swift core via FFI + C++/Qt6/Kirigami UI** for full KDE-native integration. See the parent plan (`~/.claude/plans/hermes-desktop-https-github-com-dodo-re-dreamy-bachman.md` — Strategy v2) for the new approach. The artifacts here remain useful as inputs (especially `inventory.md`, which lists every UI behavior the C++ screens must support).
+
+This directory holds the artifacts for the **2-week Phase 0 spike** that gates the port of `hermes-desktop` to Linux. See the parent plan at
 `/home/mriettini/.claude/plans/hermes-desktop-https-github-com-dodo-re-dreamy-bachman.md`.
 
 ## Status: analysis complete; build-validation deferred
