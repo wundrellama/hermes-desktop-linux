@@ -16,7 +16,9 @@ qt_add_qml_module(hermes-desktop
     VERSION 1.0
     QML_FILES
         Main.qml
+        OverviewPage.qml
         ConnectionsPage.qml
+        PlaceholderPage.qml
 )
 
 target_include_directories(hermes-desktop PRIVATE
